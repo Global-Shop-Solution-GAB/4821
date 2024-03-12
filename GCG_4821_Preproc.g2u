@@ -1,0 +1,244 @@
+Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.SetErrorHandler("Main_Err")
+F.Intrinsic.Control.ClearErrors
+V.Local.sError.Declare(String)
+
+'This will run off 2 hooks: report 16090 And 15088 ONLY
+
+V.Local..BulkDeclareString(ssql,scheck,spart, sComparePart, sRet, sRouter)
+V.Local..BulkDeclareFloat(fQty, fTotal, fRT, fPrice, fSetup,  fSU, fMatOut)
+V.Local..BulkDeclareLong(iC, iMinus)
+
+'coded by DRH
+'date 2/5/18
+'This is a custom preprocessor that runs from the BOM cost buildup screen, the data generated is based on whether or not the user checks the quantity checkbox
+
+'open connection'opening connection
+F.ODBC.Connection!con.OpenConnection(V.Ambient.PDSN,V.Ambient.PUser,V.Ambient.PPass)
+
+F.Intrinsic.Control.If(V.Caller.Hook,=,15088)
+	F.ODBC.Connection!con.Execute("DELETE FROM GCG_4821_Preproc")
+	F.Intrinsic.String.Build("Insert Into GCG_4821_Preproc  (QTY_0)  Values('{0}') ", V.Passed.000040, V.Local.ssql)
+	F.ODBC.Connection!con.Execute(V.Local.ssql)
+	F.Intrinsic.Control.CallSub(unload)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.If(V.Caller.Hook,=,16090, "And", V.Passed.CALLING-PGM,=,"BMR060E")
+	F.Intrinsic.Control.CallSub(Add_Table)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.CallSub(unload)
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Main_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4821_Preproc.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	f.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+Program.Sub.Main.End
+
+Program.Sub.Add_Table.Start
+F.Intrinsic.Control.SetErrorHandler("Add_Table_Err")
+F.Intrinsic.Control.ClearErrors
+V.Local.sError.Declare(String)
+
+
+V.Local..BulkDeclareString(ssql,scheck,spart, sComparePart, sRet, sRouter)
+V.Local..BulkDeclareFloat(fQty, fTotal, fPrice, fSetup)
+V.Local..BulkDeclareLong(iC, iMinus)
+
+'get the parent part
+F.Intrinsic.String.Build("Select PARENT_KEY from V_BI_BOM_BUILDUP_E where TRMNL = '{0}' and RPTID = '004203' and LEVEL = 'PARENT'",V.Caller.terminal,v.Local.ssql)
+F.ODBC.Connection!con.executeandreturn(V.Local.ssql,V.Local.sPart)
+'get BOM PARTS
+F.Intrinsic.String.Build("Select   PART From V_BI_BOM_BUILDUP_E Where Labor > '0' And PART <> '' And PARENT_KEY = '{0}' And  TRMNL = '{1}'", V.Local.sPart, V.Caller.terminal,V.Local.ssql)
+F.Data.DataTable.CreateFromSQL("D", "con", V.Local.ssql)
+F.Data.DataTable.Create("F", True)
+F.Data.DataTable.AddColumn("F", "ROUTER", String)
+F.Data.DataTable.AddColumn("F", "SET_UP", Float)
+F.Data.DataTable.AddColumn("F", "RUN_TIME", Float)
+F.Data.DataTable.AddColumn("F", "QTY", Float)
+	
+'loop through D and get info from Router_Line
+F.Intrinsic.Control.For(V.Local.iC, 0, V.DataTable.D.RowCount--, 1)
+	F.Intrinsic.String.Build("Select ROUTER,  SET_UP , RUN_TIME  From ROUTER_LINE Where   LMO = 'L' And Router = '{0}'", V.DataTable.D(V.Local.iC).PART!FieldValTrim, V.Local.ssql)
+	F.Data.DataTable.CreateFromSQL("TT", "con", V.Local.ssql)
+	Function.Data.DataTable.Merge("TT","F", False, 2)
+	F.Data.DataTable.Close("TT")
+F.Intrinsic.Control.Next(V.Local.iC)
+
+F.Intrinsic.String.Build("Select PARENT_QTY_1, PARENT_QTY_2, PARENT_QTY_3, PARENT_QTY_4, PARENT_QTY_5, PARENT_QTY_6, PARENT_QTY_7,PARENT_QTY_8,PARENT_QTY_9,PARENT_QTY_10 from  BI_BOM_BUILDUP_E  Where PARENT_QTY_1 > '0' And REC_TYPE = 'U' And TRMNL = '{0}' ",V.Caller.Terminal, V.Local.ssql )
+F.Data.DataTable.CreateFromSQL("QTY", "con" ,V.Local.ssql, TRUE)
+'if radio was checked: QTY from inventory master'
+F.ODBC.Connection!con.ExecuteAndReturn("Select Top 1 QTY_0 From GCG_4821_Preproc", V.Local.sRet)
+
+F.Intrinsic.Control.If(V.Local.sRet,=,"1.000000")
+	F.Intrinsic.Control.CallSub(INV)
+F.Intrinsic.Control.Else
+	F.Intrinsic.Control.CallSub(RPT)
+F.Intrinsic.Control.EndIf	
+
+F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.Label("Add_Table_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4821_PreProc.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+Program.Sub.Add_Table.End
+
+Program.Sub.INV.Start
+F.Intrinsic.Control.SetErrorHandler("INV_Err")
+F.Intrinsic.Control.ClearErrors
+V.Local.sError.Declare(String)
+
+V.Local..BulkDeclareFloat(fRT, fSU, fTotal, fMOT, fMatOut)
+V.Local..BulkDeclareString(sRet, ssql, sExp, sQTY)
+V.Local.iC.Declare(Long)
+
+'for using inventory
+F.Data.Dictionary.CreateFromSQL("dict", "con","Select PART as ROUTER, QTY_ORDER as QTY from  V_INVENTORY_MSTR")
+F.Data.Dictionary.SetDefaultReturn("dict", "0")
+F.Data.DataTable.FillFromDictionary("F", "dict", "ROUTER", "QTY")
+F.Data.Dictionary.Close("dict")
+
+F.Intrinsic.String.Build("Select MATERIAL , OUTSIDE  from V_BI_BOM_BUILDUP_E where TRMNL = '{0}' and RPTID = '004203' and DESCRIPTION = '*** PARENT TOTAL ***'",V.Caller.terminal, V.Local.ssql)
+F.ODBC.Connection!con.executeandreturn(V.Local.ssql,V.Local.sRet)	
+F.Intrinsic.String.Split(V.Local.sRet, "*!*", V.Local.fMatOut)
+F.Intrinsic.Math.Add(V.Local.fMatOut(0), V.Local.fMatOut(1), V.Local.fMOT)
+
+'Create expression columns 'check if any value = 0.
+F.Data.DataTable.AddExpressionColumn("F","RT", "Float" , "IIF(RUN_TIME > 0, 60/[RUN_TIME]/60, 0)")
+F.Data.DataTable.AddExpressionColumn("F","SU", "Float" , "IIF(SET_UP > 0, IIF(QTY > 0, [SET_UP]/[QTY], 0),  0)")
+'need sum of RT And SU
+Function.Data.DataTable.Compute("F", "SUM(RT)","", V.Local.fRT)
+Function.Data.DataTable.Compute("F", "SUM(SU)", "", V.Local.fSU)
+F.Intrinsic.Math.Add(V.Local.fRT, V.Local.fSU, V.Local.fTotal)
+
+F.Intrinsic.Control.For(V.Local.iC, 2, 10, 1)
+	'use inventory
+	F.Intrinsic.String.Build("IIF(PARENT_QTY_{0} > 0, ([PARENT_QTY_{0}] - {1})/{2}, 0)", V.Local.iC,V.Local.fMOT, V.Local.fTotal, V.Local.sExp)
+	F.Intrinsic.String.Build("QTY_{0}", V.Local.iC, V.Local.sQTY)
+	F.Data.DataTable.AddExpressionColumn("QTY", V.Local.sQTY, "Float", V.Local.sExp)
+F.Intrinsic.Control.Next(V.Local.iC)
+'save to dataBase
+
+F.ODBC.Connection!con.Execute("DELETE FROM GCG_4821_Preproc")
+Function.Data.DataTable.SaveToDB("QTY", "con", "GCG_4821_Preproc", "", 128, "PARENT_QTY_1@!@QTY_0*!*QTY_2@!@QTY_2*!*QTY_3@!@QTY_3*!*QTY_4@!@QTY_4*!*QTY_5@!@QTY_5*!*QTY_6@!@QTY_6*!*QTY_7@!@QTY_7*!*QTY_8@!@QTY_8*!*QTY_9@!@QTY_10*!*QTY_7@!@QTY_10")
+
+	
+F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.Label("INV_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4821_PreProc.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+Program.Sub.INV.End
+
+Program.Sub.RPT.Start
+F.Intrinsic.Control.SetErrorHandler("RPT_Err")
+F.Intrinsic.Control.ClearErrors
+V.Local.sError.Declare(String)
+
+V.Local..BulkDeclareFloat(fRT, fSU, fTotal, fMOT, fMatOut, fTemp)
+V.Local..BulkDeclareString(sRet, ssql, sExp, sQTY, sParent, sTemp)
+V.Local..BulkDeclareLong(iC, iRPT)
+
+'add columns 
+F.Data.DataTable.AddColumn("QTY", "QTY_0", "Float")
+F.Data.DataTable.AddColumn("QTY", "QTY_1", "Float")
+F.Data.DataTable.AddColumn("QTY", "QTY_2", "Float")
+F.Data.DataTable.AddColumn("QTY", "QTY_3", "Float")
+F.Data.DataTable.AddColumn("QTY", "QTY_4", "Float")
+F.Data.DataTable.AddColumn("QTY", "QTY_5", "Float")
+F.Data.DataTable.AddColumn("QTY", "QTY_6", "Float")
+F.Data.DataTable.AddColumn("QTY", "QTY_7", "Float")
+F.Data.DataTable.AddColumn("QTY", "QTY_8", "Float")
+F.Data.DataTable.AddColumn("QTY", "QTY_9", "Float")
+F.Data.DataTable.AddColumn("QTY", "QTY_10", "Float")
+
+F.ODBC.Connection!con.Execute("DELETE FROM GCG_4821_Preproc")
+
+'for using QTY from report
+F.Intrinsic.Control.For(V.Local.iRPT, 0, V.DataTable.QTY.RowCount--, 1)
+	F.Intrinsic.Control.If(V.DataTable.QTY(V.Local.iRPT).PARENT_QTY_1!FieldValTrim, >, 0)
+		F.Data.DataTable.SetValue("QTY", V.Local.iRPT, "QTY_0", V.DataTable.QTY(V.Local.iRPT).PARENT_QTY_1!FieldValTrim)
+		'then set qty = to this value
+		F.Data.DataTable.SetValue("F", -1, "QTY", V.DataTable.QTY(V.Local.iRPT).PARENT_QTY_1!FieldValTrim)
+		F.Intrinsic.String.Build("Select MATERIAL , OUTSIDE  from V_BI_BOM_BUILDUP_E where TRMNL = '{0}' and RPTID = '004203' and DESCRIPTION = '*** PARENT TOTAL ***'",V.Caller.terminal, V.Local.ssql)
+		F.ODBC.Connection!con.executeandreturn(V.Local.ssql,V.Local.sRet)	
+		F.Intrinsic.String.Split(V.Local.sRet, "*!*", V.Local.fMatOut)
+		F.Intrinsic.Math.Add(V.Local.fMatOut(0), V.Local.fMatOut(1), V.Local.fMOT)
+		
+		'Create expression columns 'check if any value = 0.
+		F.Data.DataTable.AddExpressionColumn("F","RT", "Float" , "IIF(RUN_TIME > 0, 60/[RUN_TIME]/60, 0)")
+		F.Data.DataTable.AddExpressionColumn("F","SU", "Float" , "IIF(SET_UP > 0, IIF(QTY > 0, [SET_UP]/[QTY], 0),  0)")
+		'need sum of RT And SU
+		Function.Data.DataTable.Compute("F", "SUM(RT)","", V.Local.fRT)
+		Function.Data.DataTable.Compute("F", "SUM(SU)", "", V.Local.fSU)
+		F.Intrinsic.Math.Add(V.Local.fRT, V.Local.fSU, V.Local.fTotal)
+		
+		'set value based on rules for rows, starting with row 0 
+		F.Intrinsic.Control.For(V.Local.iC, 2, 10, 1)
+			V.Local.sParent.Set(V.DataTable.QTY(V.Local.iRPT).PARENT_QTY_[V.Local.iC]!FieldValFloat)
+			F.Intrinsic.Control.If(V.Local.sParent, >, 0)
+				F.Intrinsic.Math.Sub(V.Local.sParent, V.Local.fMOT, V.Local.fTemp)
+				F.Intrinsic.Math.Div(V.Local.fTemp, V.Local.fTotal, V.Local.fTemp)
+				F.Intrinsic.String.Build("QTY_{0}", V.Local.iC, V.Local.sQTY)
+				F.Data.DataTable.SetValue("QTY", V.Local.iRPT, V.Local.sQTY, V.Local.fTemp)
+			F.Intrinsic.Control.Else
+				F.Intrinsic.String.Build("QTY_{0}", V.Local.iC, V.Local.sQTY)
+				F.Data.DataTable.SetValue("QTY", V.Local.iRPT, V.Local.sQTY, "0")
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.Next(V.Local.iC)
+		
+		'drop extra columns
+		F.Data.DataTable.RemoveColumn("F", "RT")
+		F.Data.DataTable.RemoveColumn("F", "SU")
+	F.Intrinsic.Control.Else
+		F.Data.DataTable.SetValue("QTY", V.Local.iRPT, "QTY_0", "0")
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Next(V.Local.iRPT)
+
+'save to dataBase
+Function.Data.DataTable.SaveToDB("QTY", "con", "GCG_4821_Preproc", "", 128, "QTY_0@!@QTY_0*!*QTY_1@!@QTY_1*!*QTY_2@!@QTY_2*!*QTY_3@!@QTY_3*!*QTY_4@!@QTY_4*!*QTY_5@!@QTY_5*!*QTY_6@!@QTY_6*!*QTY_7@!@QTY_7*!*QTY_8@!@QTY_8*!*QTY_9@!@QTY_9*!*QTY_10@!@QTY_10")
+	
+F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.Label("RPT_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4821_PreProc.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+Program.Sub.RPT.End
+
+
+Program.Sub.Unload.Start
+F.Intrinsic.Control.SetErrorHandler("Unload_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+
+'closing connection and ending program
+F.ODBC.Connection!con.Close
+Function.Intrinsic.Control.End
+
+F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.Label("Unload_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4821_PreProc.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	f.Intrinsic.Control.End
+
+Function.Intrinsic.Control.EndIf
+Program.Sub.Unload.End
+
+Program.Sub.Comments.Start
+${$0$}$$}$$}$12:00:00 AM$}$False
+Program.Sub.Comments.End
